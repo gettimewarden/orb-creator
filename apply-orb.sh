@@ -85,7 +85,7 @@ ORB_RESIZED=$(mktemp /tmp/orb_XXXXXX.png)
 CIRCLE_MASK=$(mktemp /tmp/mask_XXXXXX.png)
 trap 'rm -f "$ORB_RESIZED" "$CIRCLE_MASK"' EXIT
 
-magick "$ORB" -resize "${SIZE}x${SIZE}" -quality 100 -depth 8 "$ORB_RESIZED"
+magick "$ORB" -resize "${SIZE}x${SIZE}" -quality 95 -depth 8 "$ORB_RESIZED"
 magick "$ORB_RESIZED" -alpha extract "$CIRCLE_MASK"
 
 echo "Orb:       $ORB (${ORB_SIZE}x${ORB_SIZE})"
@@ -139,7 +139,7 @@ for i in $(seq 0 $((COUNT - 1))); do
             -gravity northwest -geometry "+${CIRCLE_X}+${CIRCLE_Y}" -composite \
             \( "$CIRCLE_MASK" \) -compose CopyOpacity -composite \
             \( "$ORB_RESIZED" \) -compose Screen -composite \
-            -depth 8 -quality 100 \
+            -depth 8 -quality 95 \
             PNG32:"${OUTPUT_DIR}/${num}.png" \
         && echo "  $(basename "$img") -> ${num}.png" \
         || { echo "  FAILED: $(basename "$img")"; exit 1; }
