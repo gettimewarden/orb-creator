@@ -78,6 +78,8 @@ if [ -z "$START_NUM" ]; then
     START_NUM=$(( ${START_NUM:-0} + 1 ))
 fi
 
+# Clean output directory and recreate
+rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
 
 # Prepare orb assets once
