@@ -1,17 +1,55 @@
 #!/bin/bash
 set -e
 
+# ── Colors & Symbols ──────────────────────────────────────────────────────────
+
+if [ -t 1 ]; then
+    BOLD=$'\033[1m'    DIM=$'\033[2m'     RESET=$'\033[0m'
+    RED=$'\033[1;31m'  GREEN=$'\033[1;32m' YELLOW=$'\033[1;33m'
+    BLUE=$'\033[1;34m' MAGENTA=$'\033[1;35m' CYAN=$'\033[1;36m'
+    WHITE=$'\033[1;37m'
+else
+    BOLD="" DIM="" RESET="" RED="" GREEN="" YELLOW="" BLUE="" MAGENTA="" CYAN="" WHITE=""
+fi
+
+CHECK="${GREEN}✓${RESET}"
+CROSS="${RED}✗${RESET}"
+ARROW="${CYAN}→${RESET}"
+DOT="${DIM}·${RESET}"
+ORB_SYM="${MAGENTA}◉${RESET}"
+
+header()  { echo ""; echo "${BOLD}${BLUE}━━━ $1 ━━━${RESET}"; echo ""; }
+info()    { echo "  ${DIM}$1${RESET}  $2"; }
+phase()   { echo ""; echo "${BOLD}${MAGENTA}▸ Phase $1:${RESET} $2"; }
+ok()      { echo "  ${CHECK} $1"; }
+fail()    { echo "  ${CROSS} ${RED}$1${RESET}"; }
+warn()    { echo "  ${YELLOW}⚠${RESET}  $1"; }
+
+show_logo() {
+    echo "${BOLD}${MAGENTA}"
+    cat << 'LOGO'
+   ___       _       ___                _
+  / _ \ _ __| |__   / __\ __ ___  __ _| |_ ___  _ __
+ | | | | '__| '_ \ / / | '__/ _ \/ _` | __/ _ \| '__|
+ | |_| | |  | |_) / /__| | |  __| (_| | || (_) | |
+  \___/|_|  |_.__/\____/_|  \___|\__,_|\__\___/|_|
+LOGO
+    echo "${RESET}"
+}
+
+# ── Setup ─────────────────────────────────────────────────────────────────────
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ORB="$SCRIPT_DIR/assets/orb.png"
 
-# Defaults
 INPUT_DIR="$SCRIPT_DIR/input"
 OUTPUT_DIR="$SCRIPT_DIR/output"
 SIZE=""
 START_NUM=""
-JOBS=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
+JOBS=20
 
-# Parse arguments
+# ── Parse Arguments ───────────────────────────────────────────────────────────
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --size)    SIZE="$2"; shift 2 ;;
@@ -20,88 +58,96 @@ while [[ $# -gt 0 ]]; do
         --output)  OUTPUT_DIR="$2"; shift 2 ;;
         --jobs|-j) JOBS="$2"; shift 2 ;;
         --help|-h)
-            echo "Usage: ./apply-orb.sh [input_dir] [options]"
+            show_logo
+            echo "${BOLD}Usage:${RESET} ./apply-orb.sh ${DIM}[input_dir] [options]${RESET}"
             echo ""
-            echo "Arguments:"
-            echo "  input_dir          Source images directory (default: ./input)"
+            echo "${BOLD}Arguments:${RESET}"
+            echo "  ${CYAN}input_dir${RESET}          Source images directory ${DIM}(default: ./input)${RESET}"
             echo ""
-            echo "Options:"
-            echo "  --size   N         Output size in pixels (default: orb's native size)"
-            echo "  --start  N         Starting file number (default: auto-detect)"
-            echo "  --orb    PATH      Path to orb overlay (default: ./assets/orb.png)"
-            echo "  --output DIR       Output directory (default: ./output)"
-            echo "  -j, --jobs N       Parallel jobs (default: number of CPU cores)"
-            echo "  -h, --help         Show this help"
+            echo "${BOLD}Options:${RESET}"
+            echo "  ${CYAN}--size${RESET}   N         Output size in pixels ${DIM}(default: orb's native size)${RESET}"
+            echo "  ${CYAN}--start${RESET}  N         Starting file number ${DIM}(default: auto-detect)${RESET}"
+            echo "  ${CYAN}--orb${RESET}    PATH      Path to orb overlay ${DIM}(default: ./assets/orb.png)${RESET}"
+            echo "  ${CYAN}--output${RESET} DIR       Output directory ${DIM}(default: ./output)${RESET}"
+            echo "  ${CYAN}-j, --jobs${RESET} N       Parallel jobs ${DIM}(default: CPU cores)${RESET}"
+            echo "  ${CYAN}-h, --help${RESET}         Show this help"
             exit 0
             ;;
         *)
             if [ -d "$1" ]; then
                 INPUT_DIR="$1"
             else
-                echo "Error: Unknown option or directory not found: $1"; exit 1
+                fail "Unknown option or directory not found: $1"; exit 1
             fi
             shift
             ;;
     esac
 done
 
-# Validate
-[ -f "$ORB" ] || { echo "Error: Orb not found at $ORB"; exit 1; }
-[ -d "$INPUT_DIR" ] || { echo "Error: Input directory not found: $INPUT_DIR"; exit 1; }
-command -v magick >/dev/null || { echo "Error: ImageMagick is required (brew install imagemagick)"; exit 1; }
+# ── Banner ────────────────────────────────────────────────────────────────────
 
-# Get orb canvas size
-ORB_SIZE=$(magick identify -format "%w" "$ORB")
+show_logo
 
-# Detect the orb's visible circle within the canvas
+# ── Validate ──────────────────────────────────────────────────────────────────
+
+MISSING=0
+[ ! -f "$ORB" ]                    && fail "Orb not found at $ORB"          && MISSING=1
+[ ! -d "$INPUT_DIR" ]              && fail "Input dir not found: $INPUT_DIR" && MISSING=1
+! command -v magick >/dev/null     && fail "ImageMagick required ${DIM}(brew install imagemagick)${RESET}" && MISSING=1
+[ "$MISSING" -eq 1 ] && exit 1
+
+# ── Detect Orb Geometry ──────────────────────────────────────────────────────
+
+ORB_NATIVE=$(magick identify -format "%w" "$ORB")
+
 CIRCLE_INFO=$(magick "$ORB" -alpha extract -trim -format "%w %X %Y" info:)
 CIRCLE_DIM=$(echo "$CIRCLE_INFO" | awk '{print $1}')
 CIRCLE_X=$(echo "$CIRCLE_INFO" | awk '{gsub(/\+/,"",$2); print $2}')
 CIRCLE_Y=$(echo "$CIRCLE_INFO" | awk '{gsub(/\+/,"",$3); print $3}')
 
-# Apply output scaling if --size is given
-if [ -n "$SIZE" ]; then
-    SCALE=$(echo "$SIZE $ORB_SIZE" | awk '{printf "%.6f", $1/$2}')
-    CIRCLE_DIM=$(echo "$CIRCLE_DIM $SCALE" | awk '{printf "%d", $1*$2}')
-    CIRCLE_X=$(echo "$CIRCLE_X $SCALE" | awk '{printf "%d", $1*$2}')
-    CIRCLE_Y=$(echo "$CIRCLE_Y $SCALE" | awk '{printf "%d", $1*$2}')
-else
-    SIZE=$ORB_SIZE
-fi
+SIZE="${SIZE:-231}"
+SCALE=$(echo "$SIZE $ORB_NATIVE" | awk '{printf "%.6f", $1/$2}')
+CIRCLE_DIM=$(echo "$CIRCLE_DIM $SCALE" | awk '{printf "%d", $1*$2}')
+CIRCLE_X=$(echo "$CIRCLE_X $SCALE" | awk '{printf "%d", $1*$2}')
+CIRCLE_Y=$(echo "$CIRCLE_Y $SCALE" | awk '{printf "%d", $1*$2}')
 
-# Auto-detect next number from output directory
+# Default to 1 since output is always cleaned
 if [ -z "$START_NUM" ]; then
-    START_NUM=$(ls "$OUTPUT_DIR"/*.png 2>/dev/null \
-        | xargs -I{} basename {} .png \
-        | grep -E '^[0-9]+$' \
-        | sort -n | tail -1)
-    START_NUM=$(( ${START_NUM:-0} + 1 ))
+    START_NUM=1
 fi
 
-# Clean output directory and recreate
+# ── Config Summary ────────────────────────────────────────────────────────────
+
+header "Configuration"
+info "${ORB_SYM} Orb"   "${WHITE}${ORB_NATIVE}x${ORB_NATIVE}${RESET}  ${DIM}$(basename "$ORB")${RESET}"
+info "  Circle"          "${CYAN}${CIRCLE_DIM}x${CIRCLE_DIM}${RESET} at +${CIRCLE_X}+${CIRCLE_Y}"
+info "  Output"          "${GREEN}${SIZE}x${SIZE}${RESET} px"
+info "  Input"           "${DIM}${INPUT_DIR}${RESET}"
+info "  Output"          "${DIM}${OUTPUT_DIR}${RESET}"
+info "  Start #"         "${WHITE}${START_NUM}${RESET}"
+info "  Jobs"            "${YELLOW}${JOBS}${RESET} parallel"
+echo ""
+info "  Tools" ""
+command -v magick >/dev/null   && ok "ImageMagick ${DIM}$(magick --version 2>/dev/null | head -1 | awk '{print $3}')${RESET}" || fail "ImageMagick"
+command -v pngquant >/dev/null && ok "pngquant ${DIM}$(pngquant --version 2>/dev/null)${RESET}"    || warn "pngquant not found ${DIM}(brew install pngquant)${RESET}"
+command -v clop >/dev/null     && ok "clop"                                                         || warn "clop not found ${DIM}(lowtechguys.com/clop)${RESET}"
+
+# ── Clean & Prepare ──────────────────────────────────────────────────────────
+
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
 
-# Prepare orb assets once
-ORB_RESIZED=$(mktemp /tmp/orb_XXXXXX.png)
-CIRCLE_MASK=$(mktemp /tmp/mask_XXXXXX.png)
-trap 'rm -f "$ORB_RESIZED" "$CIRCLE_MASK"' EXIT
+TMPDIR_ORB=$(mktemp -d)
+trap 'rm -rf "$TMPDIR_ORB"' EXIT
+
+ORB_RESIZED="$TMPDIR_ORB/orb.png"
+CIRCLE_MASK="$TMPDIR_ORB/mask.png"
 
 magick "$ORB" -resize "${SIZE}x${SIZE}" -quality 95 -depth 8 "$ORB_RESIZED"
 magick "$ORB_RESIZED" -alpha extract "$CIRCLE_MASK"
 
-echo "Orb:       $ORB (${ORB_SIZE}x${ORB_SIZE})"
-echo "Circle:    ${CIRCLE_DIM}x${CIRCLE_DIM} at +${CIRCLE_X}+${CIRCLE_Y}"
-echo "Output:    ${SIZE}x${SIZE}"
-echo "Input:     $INPUT_DIR"
-echo "Output:    $OUTPUT_DIR"
-echo "Start:     $START_NUM"
-echo "Jobs:      $JOBS"
-echo ""
+# ── Collect Images ────────────────────────────────────────────────────────────
 
-# ── Phase 1: Apply orb (parallel via job pool) ────────────────────────────────
-
-# Collect images into arrays
 IMAGES=()
 NUMBERS=()
 NUM=$START_NUM
@@ -116,24 +162,20 @@ done
 
 COUNT=${#IMAGES[@]}
 if [ "$COUNT" -eq 0 ]; then
-    echo "No images found in $INPUT_DIR"
+    warn "No images found in $INPUT_DIR"
     exit 0
 fi
 
-echo "Phase 1: Applying orb to $COUNT images ($JOBS parallel jobs)..."
+# ── Phase 1: Apply Orb ───────────────────────────────────────────────────────
+
+phase "1" "Applying orb to ${WHITE}${COUNT}${RESET} images ${DIM}(${JOBS} threads)${RESET}"
 
 RUNNING=0
-FAILED=0
 for i in $(seq 0 $((COUNT - 1))); do
     img="${IMAGES[$i]}"
     num="${NUMBERS[$i]}"
 
     (
-        # 1. Create transparent canvas at full orb size
-        # 2. Resize source image to fill the visible circle (center-crop to square)
-        # 3. Place it at the circle's offset on the canvas
-        # 4. Apply circular mask from the orb's alpha channel
-        # 5. Composite the orb on top using Screen blend mode
         magick \
             \( -size "${SIZE}x${SIZE}" xc:none \) \
             \( "$img" -resize "${CIRCLE_DIM}x${CIRCLE_DIM}^" \
@@ -141,10 +183,10 @@ for i in $(seq 0 $((COUNT - 1))); do
             -gravity northwest -geometry "+${CIRCLE_X}+${CIRCLE_Y}" -composite \
             \( "$CIRCLE_MASK" \) -compose CopyOpacity -composite \
             \( "$ORB_RESIZED" \) -compose Screen -composite \
-            -depth 8 -quality 95 \
+            -strip -depth 8 -quality 95 \
             PNG32:"${OUTPUT_DIR}/${num}.png" \
-        && echo "  $(basename "$img") -> ${num}.png" \
-        || { echo "  FAILED: $(basename "$img")"; exit 1; }
+        && echo "  ${CHECK} ${DIM}$(basename "$img" | cut -c1-45)${RESET}  ${ARROW}  ${GREEN}${num}.png${RESET}" \
+        || echo "  ${CROSS} ${RED}$(basename "$img" | cut -c1-45)${RESET}  FAILED"
     ) &
 
     RUNNING=$((RUNNING + 1))
@@ -155,32 +197,21 @@ for i in $(seq 0 $((COUNT - 1))); do
 done
 wait
 
+ok "Rendered ${WHITE}${COUNT}${RESET} images"
+
+# ── Summary ───────────────────────────────────────────────────────────────────
+
+TOTAL_SIZE=$(du -sh "$OUTPUT_DIR" | awk '{print $1}')
+MAX_FILE=$(stat -f '%z %N' "$OUTPUT_DIR"/*.png | sort -rn | head -1)
+MAX_KB=$(echo "$MAX_FILE" | awk '{printf "%.1f", $1/1024}')
+MAX_NAME=$(basename "$(echo "$MAX_FILE" | cut -d' ' -f2-)")
+MIN_FILE=$(stat -f '%z %N' "$OUTPUT_DIR"/*.png | sort -n | head -1)
+MIN_KB=$(echo "$MIN_FILE" | awk '{printf "%.1f", $1/1024}')
+
+header "Complete"
+echo "  ${ORB_SYM} ${WHITE}${COUNT}${RESET} images ${ARROW} ${GREEN}${OUTPUT_DIR}${RESET}"
+echo "  ${DOT} Total:      ${CYAN}${TOTAL_SIZE}${RESET}"
+echo "  ${DOT} Range:      ${CYAN}${MIN_KB}KB${RESET} – ${CYAN}${MAX_KB}KB${RESET}"
+echo "  ${DOT} Largest:    ${CYAN}${MAX_KB}KB${RESET} ${DIM}(${MAX_NAME})${RESET}"
+echo "  ${DOT} Dimensions: ${CYAN}${SIZE}x${SIZE}${RESET} px"
 echo ""
-echo "Phase 1 complete: $COUNT images rendered"
-
-# ── Phase 2: Compress with pngquant (parallel) ────────────────────────────────
-
-if command -v pngquant >/dev/null; then
-    echo ""
-    echo "Phase 2: Compressing with pngquant ($JOBS parallel jobs)..."
-    ls "$OUTPUT_DIR"/*.png | xargs -P "$JOBS" -I {} pngquant --quality=65-95 --speed 1 --force --ext .png --strip {}
-    echo "Phase 2 complete"
-else
-    echo ""
-    echo "Skipping pngquant: not found (brew install pngquant)"
-fi
-
-# ── Phase 3: Optimize with clop ────────────────────────────────────────────────
-
-if command -v clop >/dev/null; then
-    echo ""
-    echo "Phase 3: Optimizing with clop..."
-    clop optimise --no-progress --no-adaptive-optimisation --aggressive --types png "$OUTPUT_DIR"
-    echo "Phase 3 complete"
-else
-    echo ""
-    echo "Skipping clop: not found (install from https://lowtechguys.com/clop)"
-fi
-
-echo ""
-echo "Done! $COUNT images -> $OUTPUT_DIR"
