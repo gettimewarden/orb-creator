@@ -82,18 +82,21 @@ NUM=$START_NUM
 COUNT=0
 for img in "$INPUT_DIR"/*; do
     [ -f "$img" ] || continue
-    case "${img,,}" in *.png|*.jpg|*.jpeg|*.webp|*.bmp|*.tiff) ;; *) continue ;; esac
+    # Filter by extension (case-insensitive via tr)
+    ext=$(echo "${img##*.}" | tr '[:upper:]' '[:lower:]')
+    case "$ext" in png|jpg|jpeg|webp|bmp|tiff|tif|avif|heic|gif|svg) ;; *) continue ;; esac
 
     output_name="${NUM}.png"
     echo "$(basename "$img") -> $output_name"
 
     # Center-crop to square -> resize -> circular mask -> orb overlay (Screen blend)
+    # ImageMagick handles all input formats; output is always PNG
     magick "$img" \
         -resize "${SIZE}x${SIZE}^" \
         -gravity center -extent "${SIZE}x${SIZE}" \
         \( "$CIRCLE_MASK" \) -alpha off -compose CopyOpacity -composite \
         \( "$ORB_RESIZED" -compose Screen \) -composite \
-        "$OUTPUT_DIR/$output_name"
+        PNG:"$OUTPUT_DIR/$output_name"
 
     NUM=$((NUM + 1))
     COUNT=$((COUNT + 1))
