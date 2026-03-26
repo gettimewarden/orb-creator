@@ -158,16 +158,28 @@ wait
 echo ""
 echo "Phase 1 complete: $COUNT images rendered"
 
-# ── Phase 2: Optimize with clop ────────────────────────────────────────────────
+# ── Phase 2: Compress with pngquant (parallel) ────────────────────────────────
+
+if command -v pngquant >/dev/null; then
+    echo ""
+    echo "Phase 2: Compressing with pngquant ($JOBS parallel jobs)..."
+    ls "$OUTPUT_DIR"/*.png | xargs -P "$JOBS" -I {} pngquant --quality=65-95 --speed 1 --force --ext .png --strip {}
+    echo "Phase 2 complete"
+else
+    echo ""
+    echo "Skipping pngquant: not found (brew install pngquant)"
+fi
+
+# ── Phase 3: Optimize with clop ────────────────────────────────────────────────
 
 if command -v clop >/dev/null; then
     echo ""
-    echo "Phase 2: Optimizing $COUNT images with clop..."
-    clop optimise --no-progress --no-adaptive-optimisation --types png "$OUTPUT_DIR"
-    echo "Phase 2 complete: all images optimized"
+    echo "Phase 3: Optimizing with clop..."
+    clop optimise --no-progress --no-adaptive-optimisation --aggressive --types png "$OUTPUT_DIR"
+    echo "Phase 3 complete"
 else
     echo ""
-    echo "Skipping optimization: clop not found (install from https://lowtechguys.com/clop)"
+    echo "Skipping clop: not found (install from https://lowtechguys.com/clop)"
 fi
 
 echo ""
